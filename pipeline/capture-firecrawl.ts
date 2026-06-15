@@ -1,13 +1,15 @@
 import type { CaptureResult } from "./types";
-import { createAdminClient, MEDIA_BUCKET } from "@/lib/supabase/admin";
-import { domainFromUrl, slugify } from "@/lib/utils";
+import {
+  CAPTURE_INJECTED_STYLES,
+  captureStoragePath,
+  downloadAndUploadScreenshot,
+} from "./capture-storage";
 
 const FIRECRAWL_API = "https://api.firecrawl.dev/v2/scrape";
 
 type ScreenshotRequest = {
   mobile?: boolean;
   viewport: { width: number; height: number };
-  fullPage?: boolean;
   filename: string;
 };
 
@@ -16,12 +18,8 @@ export const canUseFirecrawl = () => Boolean(process.env.FIRECRAWL_API_KEY?.trim
 export async function captureWithFirecrawl(url: string): Promise<CaptureResult> {
   const apiKey = process.env.FIRECRAWL_API_KEY?.trim();
   if (!apiKey) {
-    throw new Error("FIRECRAWL_API_KEY is required for screenshots on Vercel.");
+    throw new Error("FIRECRAWL_API_KEY is required for Firecrawl capture.");
   }
-
-  const domain = slugify(domainFromUrl(url)) || "site";
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const root = `captures/${domain}/${stamp}`;
 
   const shots: Array<ScreenshotRequest & { kind: CaptureResult["media"][number]["kind"] }> = [
     {
@@ -43,12 +41,13 @@ export async function captureWithFirecrawl(url: string): Promise<CaptureResult> 
     const screenshotUrl = await requestScreenshot(url, apiKey, shot);
     if (!screenshotUrl) continue;
 
-    const uploaded = await downloadAndUpload(url, screenshotUrl, `${root}/${shot.filename}`);
+    const storagePath = captureStoragePath(url, shot.filename);
+    const uploaded = await downloadAndUploadScreenshot(url, screenshotUrl, storagePath);
     if (!uploaded) continue;
 
     media.push({
       kind: shot.kind,
-      storagePath: uploaded.path,
+      storagePath: uploaded,
       width: shot.viewport.width,
       height: shot.viewport.height,
     });
@@ -66,6 +65,15 @@ async function requestScreenshot(
   apiKey: string,
   shot: ScreenshotRequest,
 ): Promise<string | null> {
+  const hideScrollbarScript = `
+    window.scrollTo(0, 0);
+    const style = document.createElement('style');
+    style.textContent = ${JSON.stringify(CAPTURE_INJECTED_STYLES)};
+    document.head.appendChild(style);
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+  `;
+
   const response = await fetch(FIRECRAWL_API, {
     method: "POST",
     headers: {
@@ -74,56 +82,38 @@ async function requestScreenshot(
     },
     body: JSON.stringify({
       url,
-      formats: [
+      onlyMainContent: false,
+      waitFor: 4000,
+      mobile: shot.mobile ?? false,
+      actions: [
+        { type: "executeJavascript", script: hideScrollbarScript },
+        { type: "wait", milliseconds: 1000 },
         {
           type: "screenshot",
-          fullPage: shot.fullPage ?? false,
+          fullPage: false,
           viewport: shot.viewport,
           quality: 90,
         },
       ],
-      onlyMainContent: false,
-      waitFor: 5000,
-      mobile: shot.mobile ?? false,
     }),
   });
 
   const payload = (await response.json()) as {
     success?: boolean;
     error?: string;
-    data?: { screenshot?: string };
+    data?: {
+      screenshot?: string;
+      actions?: { screenshots?: string[] };
+    };
   };
 
   if (!response.ok || !payload.success) {
     throw new Error(payload.error ?? `Firecrawl screenshot failed (${response.status})`);
   }
 
-  return payload.data?.screenshot ?? null;
-}
-
-async function downloadAndUpload(
-  pageUrl: string,
-  imageUrl: string,
-  storagePath: string,
-): Promise<{ path: string } | null> {
-  try {
-    const response = await fetch(imageUrl, { redirect: "follow" });
-    if (!response.ok) return null;
-
-    const contentType = response.headers.get("content-type") ?? "image/png";
-    if (!contentType.startsWith("image/")) return null;
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const db = createAdminClient();
-    const { error } = await db.storage.from(MEDIA_BUCKET).upload(storagePath, buffer, {
-      contentType,
-      upsert: true,
-    });
-    if (error) throw error;
-
-    return { path: storagePath };
-  } catch (error) {
-    console.warn(`[capture] Could not persist screenshot for ${pageUrl}:`, error);
-    return null;
-  }
+  return (
+    payload.data?.actions?.screenshots?.[0] ??
+    payload.data?.screenshot ??
+    null
+  );
 }

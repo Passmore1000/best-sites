@@ -1,14 +1,15 @@
 import type { CaptureResult } from "./types";
-import { createAdminClient, MEDIA_BUCKET } from "@/lib/supabase/admin";
-import { domainFromUrl, slugify } from "@/lib/utils";
+import { CAPTURE_INJECTED_STYLES } from "./capture-storage";
 import { canUseFirecrawl, captureWithFirecrawl } from "./capture-firecrawl";
+import { canUseMicrolink, captureWithMicrolink } from "./capture-microlink";
 
 /**
  * Website capture.
  *
  * Priority:
  * 1. Playwright (local / worker) — full desktop, mobile, and full-page shots
- * 2. Firecrawl (Vercel / serverless) — real viewport screenshots
+ * 2. Microlink (Vercel / serverless) — clean viewport screenshots
+ * 3. Firecrawl — fallback when Microlink fails
  */
 export async function captureWebsite(url: string): Promise<CaptureResult> {
   if (await canUsePlaywright()) {
@@ -16,6 +17,14 @@ export async function captureWebsite(url: string): Promise<CaptureResult> {
       return await captureWithPlaywright(url);
     } catch (error) {
       console.warn("[capture] Playwright failed:", error);
+    }
+  }
+
+  if (canUseMicrolink()) {
+    try {
+      return await captureWithMicrolink(url);
+    } catch (error) {
+      console.warn("[capture] Microlink failed:", error);
       if (canUseFirecrawl()) {
         return captureWithFirecrawl(url);
       }
@@ -28,12 +37,14 @@ export async function captureWebsite(url: string): Promise<CaptureResult> {
   }
 
   throw new Error(
-    "No capture provider available. Run locally with Playwright or set FIRECRAWL_API_KEY on Vercel.",
+    "No capture provider available. Run locally with Playwright or configure Microlink/Firecrawl.",
   );
 }
 
 const canUsePlaywright = async () => {
-  if (process.env.CAPTURE_MODE === "firecrawl") return false;
+  if (process.env.CAPTURE_MODE === "microlink" || process.env.CAPTURE_MODE === "firecrawl") {
+    return false;
+  }
   if (process.env.CAPTURE_MODE === "playwright") return true;
   if (process.env.VERCEL) return false;
 
@@ -47,6 +58,8 @@ const canUsePlaywright = async () => {
 
 async function captureWithPlaywright(url: string): Promise<CaptureResult> {
   const { chromium } = await import("playwright");
+  const { createAdminClient, MEDIA_BUCKET } = await import("@/lib/supabase/admin");
+  const { domainFromUrl, slugify } = await import("@/lib/utils");
 
   const db = createAdminClient();
   const domain = slugify(domainFromUrl(url)) || "site";
@@ -113,13 +126,14 @@ async function capturePage(
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const context = await browser.newContext({
     viewport: { width: options.width, height: options.height },
-    deviceScaleFactor: 2,
+    deviceScaleFactor: 1,
     isMobile: options.isMobile ?? false,
     userAgent: "BestSitesBot/1.0 (+https://bestsites.io)",
   });
   const page = await context.newPage();
 
   try {
+    await page.addStyleTag({ content: CAPTURE_INJECTED_STYLES });
     await gotoSettled(page, url);
     const buffer = await page.screenshot({
       type: "png",
@@ -142,6 +156,7 @@ async function capturePage(
 
 async function gotoSettled(page: import("playwright").Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
   await page.waitForTimeout(1000);
 }

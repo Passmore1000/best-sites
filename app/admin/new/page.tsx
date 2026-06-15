@@ -149,8 +149,8 @@ export default function NewListingPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Add inspiration</h1>
         <p className="mt-2 max-w-2xl text-muted-foreground">
-          Paste a URL and we&apos;ll capture a real viewport screenshot of the hero,
-          pull metadata, and create a draft listing.
+          Paste a URL and we&apos;ll capture a clean viewport screenshot, pull metadata,
+          and create a draft listing.
         </p>
 
         <Card className="mt-6 p-6">
