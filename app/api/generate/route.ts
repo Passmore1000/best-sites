@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/auth";
 import { claimPipelineJob, createPipelineJob, getPipelineJob } from "@/lib/jobs";
+import { revalidatePublicPages } from "@/lib/revalidate-public";
 import type { PipelineJobOptions } from "@/lib/types";
 import { processPipelineJob } from "@/worker/process";
 
@@ -50,6 +51,10 @@ export async function POST(request: Request) {
         },
         { status: 500 },
       );
+    }
+
+    if (result.status === "published") {
+      revalidatePublicPages(result.slug);
     }
 
     return NextResponse.json({

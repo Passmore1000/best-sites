@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/auth";
+import { revalidatePublicPages } from "@/lib/revalidate-public";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TagKind, WebsiteRow } from "@/lib/types";
 import { slugify } from "@/lib/utils";
@@ -71,14 +72,23 @@ export async function POST(request: Request, { params }: Ctx) {
   const db = createAdminClient();
 
   if (action === "publish") {
-    const { error } = await db
+    const { data: site, error } = await db
       .from("websites")
       .update({ status: "published", published_at: new Date().toISOString() })
-      .eq("id", id);
+      .eq("id", id)
+      .select("slug")
+      .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    revalidatePublicPages(site.slug);
   } else if (action === "unpublish") {
-    const { error } = await db.from("websites").update({ status: "draft" }).eq("id", id);
+    const { data: site, error } = await db
+      .from("websites")
+      .update({ status: "draft", published_at: null })
+      .eq("id", id)
+      .select("slug")
+      .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    revalidatePublicPages(site.slug);
   } else {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
@@ -89,7 +99,10 @@ export async function DELETE(_request: Request, { params }: Ctx) {
   const denied = await guard();
   if (denied) return denied;
   const { id } = await params;
-  const { error } = await createAdminClient().from("websites").delete().eq("id", id);
+  const db = createAdminClient();
+  const { data: site } = await db.from("websites").select("slug").eq("id", id).maybeSingle();
+  const { error } = await db.from("websites").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  revalidatePublicPages(site?.slug);
   return NextResponse.json({ ok: true });
 }
