@@ -1,28 +1,39 @@
 import type { CaptureResult } from "./types";
 import { createAdminClient, MEDIA_BUCKET } from "@/lib/supabase/admin";
 import { domainFromUrl, slugify } from "@/lib/utils";
-import { extractMetadata } from "./metadata";
+import { canUseFirecrawl, captureWithFirecrawl } from "./capture-firecrawl";
 
 /**
  * Website capture.
  *
- * Uses Playwright when available (local dev / worker). Falls back to a lightweight
- * metadata + OG-image capture on serverless hosts like Vercel where Chromium cannot run.
+ * Priority:
+ * 1. Playwright (local / worker) — full desktop, mobile, and full-page shots
+ * 2. Firecrawl (Vercel / serverless) — real viewport screenshots
  */
 export async function captureWebsite(url: string): Promise<CaptureResult> {
   if (await canUsePlaywright()) {
     try {
       return await captureWithPlaywright(url);
     } catch (error) {
-      console.warn("[capture] Playwright failed, falling back to lite capture:", error);
+      console.warn("[capture] Playwright failed:", error);
+      if (canUseFirecrawl()) {
+        return captureWithFirecrawl(url);
+      }
+      throw error;
     }
   }
 
-  return captureLite(url);
+  if (canUseFirecrawl()) {
+    return captureWithFirecrawl(url);
+  }
+
+  throw new Error(
+    "No capture provider available. Run locally with Playwright or set FIRECRAWL_API_KEY on Vercel.",
+  );
 }
 
 const canUsePlaywright = async () => {
-  if (process.env.CAPTURE_MODE === "lite") return false;
+  if (process.env.CAPTURE_MODE === "firecrawl") return false;
   if (process.env.CAPTURE_MODE === "playwright") return true;
   if (process.env.VERCEL) return false;
 
@@ -33,58 +44,6 @@ const canUsePlaywright = async () => {
     return false;
   }
 };
-
-async function captureLite(url: string): Promise<CaptureResult> {
-  const metadata = await extractMetadata(url);
-  const media: CaptureResult["media"] = [];
-
-  if (metadata.ogImageUrl) {
-    const uploaded = await tryUploadRemoteImage(url, metadata.ogImageUrl, "desktop-og");
-    media.push({
-      kind: "desktop_shot",
-      storagePath: uploaded ?? metadata.ogImageUrl,
-      width: 1200,
-      height: 630,
-    });
-  }
-
-  return { media };
-}
-
-async function tryUploadRemoteImage(
-  pageUrl: string,
-  imageUrl: string,
-  filename: string,
-): Promise<string | null> {
-  try {
-    const response = await fetch(imageUrl, {
-      headers: { "user-agent": "BestSitesBot/1.0 (+https://bestsites.io)" },
-      redirect: "follow",
-    });
-    if (!response.ok) return null;
-
-    const contentType = response.headers.get("content-type") ?? "image/png";
-    if (!contentType.startsWith("image/")) return null;
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const db = createAdminClient();
-    const domain = slugify(domainFromUrl(pageUrl)) || "site";
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const extension = contentType.includes("jpeg") ? "jpg" : contentType.includes("webp") ? "webp" : "png";
-    const path = `captures/${domain}/${stamp}/${filename}.${extension}`;
-
-    const { error } = await db.storage.from(MEDIA_BUCKET).upload(path, buffer, {
-      contentType,
-      upsert: true,
-    });
-    if (error) throw error;
-
-    return path;
-  } catch (error) {
-    console.warn("[capture] Could not upload remote preview image:", error);
-    return null;
-  }
-}
 
 async function captureWithPlaywright(url: string): Promise<CaptureResult> {
   const { chromium } = await import("playwright");
@@ -97,8 +56,8 @@ async function captureWithPlaywright(url: string): Promise<CaptureResult> {
 
   try {
     const desktop = await capturePage(browser, url, {
-      width: 1280,
-      height: 800,
+      width: 1440,
+      height: 900,
       fullPage: false,
     });
     const mobile = await capturePage(browser, url, {
@@ -108,7 +67,7 @@ async function captureWithPlaywright(url: string): Promise<CaptureResult> {
       fullPage: false,
     });
     const fullPage = await capturePage(browser, url, {
-      width: 1280,
+      width: 1440,
       height: 900,
       fullPage: true,
     });
@@ -154,7 +113,7 @@ async function capturePage(
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const context = await browser.newContext({
     viewport: { width: options.width, height: options.height },
-    deviceScaleFactor: 1,
+    deviceScaleFactor: 2,
     isMobile: options.isMobile ?? false,
     userAgent: "BestSitesBot/1.0 (+https://bestsites.io)",
   });
@@ -184,5 +143,5 @@ async function capturePage(
 async function gotoSettled(page: import("playwright").Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
-  await page.waitForTimeout(750);
+  await page.waitForTimeout(1000);
 }

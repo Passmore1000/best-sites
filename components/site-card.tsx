@@ -29,13 +29,13 @@ export const SiteCard = ({ site, onSelect }: SiteCardProps) => {
       className="group block w-full cursor-pointer text-left"
       aria-label={`View ${site.name}`}
     >
-      <div className="relative overflow-hidden rounded-2xl bg-muted">
-        <div className="aspect-[4/3]">
+      <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-[#f4f4f5] shadow-sm">
+        <div className="aspect-[16/10]">
           {shot ? (
             <img
               src={shot}
               alt={site.name}
-              className="h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.02]"
+              className="h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.01]"
               loading="lazy"
             />
           ) : (
