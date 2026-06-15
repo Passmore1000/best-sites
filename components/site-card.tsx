@@ -1,74 +1,76 @@
-import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
+"use client";
+
 import { mediaOf } from "@/lib/queries";
 import { mediaUrl } from "@/lib/supabase/admin";
 import type { WebsiteWithRelations } from "@/lib/types";
 
-export function SiteCard({ site }: { site: WebsiteWithRelations }) {
+type SiteCardProps = {
+  site: WebsiteWithRelations;
+  onSelect: (site: WebsiteWithRelations) => void;
+};
+
+export const SiteCard = ({ site, onSelect }: SiteCardProps) => {
   const shot = mediaUrl(mediaOf(site, "desktop_shot")?.storage_path);
-  const sections = site.tags.filter((tag) => tag.kind === "section");
+
+  const handleClick = () => onSelect(site);
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(site);
+    }
+  };
 
   return (
-    <Link
-      href={`/sites/${site.slug}`}
-      className="group block"
+    <button
+      type="button"
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      className="group block w-full cursor-pointer text-left"
+      aria-label={`View ${site.name}`}
     >
-      <div className="relative flex aspect-[1.08] items-center justify-center overflow-hidden rounded-[1.5rem] bg-muted p-6 transition-colors group-hover:bg-border/70">
-        {shot ? (
-          <img
-            src={shot}
-            alt={`${site.name} desktop screenshot`}
-            className="max-h-full w-full rounded-lg border border-border bg-card object-contain shadow-sm transition-transform duration-300 group-hover:scale-[1.015]"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm font-medium text-muted-foreground">
-            No screenshot yet
-          </div>
-        )}
-      </div>
-      <div className="flex gap-3 px-1 py-4">
-        {site.favicon_url ? (
-          <img src={site.favicon_url} alt="" className="mt-0.5 h-8 w-8 rounded-lg border border-border bg-card" />
-        ) : (
-          <div className="mt-0.5 h-8 w-8 rounded-lg bg-muted" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="truncate font-semibold">{site.name}</h3>
-            {site.industry && (
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">{site.industry}</span>
-            )}
-          </div>
-          {site.summary && (
-            <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">{site.summary}</p>
-          )}
-          {sections.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {sections.slice(0, 3).map((tag) => (
-                <Badge key={tag.slug}>{tag.label}</Badge>
-              ))}
+      <div className="relative overflow-hidden rounded-2xl bg-muted">
+        <div className="aspect-[4/3]">
+          {shot ? (
+            <img
+              src={shot}
+              alt={site.name}
+              className="h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.02]"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              No screenshot yet
             </div>
           )}
         </div>
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-foreground/70 to-transparent p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+          <p className="truncate text-sm font-medium text-background">{site.name}</p>
+        </div>
       </div>
-    </Link>
+    </button>
   );
-}
+};
 
-export function SiteGrid({ sites }: { sites: WebsiteWithRelations[] }) {
+type SiteGridProps = {
+  sites: WebsiteWithRelations[];
+  onSiteSelect: (site: WebsiteWithRelations) => void;
+};
+
+export const SiteGrid = ({ sites, onSiteSelect }: SiteGridProps) => {
   if (sites.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
-        No websites match yet.
+      <div className="rounded-2xl border border-dashed border-border px-8 py-24 text-center text-muted-foreground">
+        No sites match this filter yet.
       </div>
     );
   }
+
   return (
-    <div className="grid grid-cols-1 gap-x-5 gap-y-10 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
       {sites.map((site) => (
-        <SiteCard key={site.id} site={site} />
+        <SiteCard key={site.id} site={site} onSelect={onSiteSelect} />
       ))}
     </div>
   );
-}
+};

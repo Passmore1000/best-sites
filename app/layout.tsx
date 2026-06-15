@@ -10,12 +10,11 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "BestSites.io — Small Business Website Inspiration",
-    template: "%s · BestSites.io",
+    default: "BestSites — Web Design Inspiration",
+    template: "%s · BestSites",
   },
-  description:
-    "Browse saved small-business website inspiration by industry, section, style, and technology.",
-  openGraph: { type: "website", siteName: "BestSites.io" },
+  description: "A curated gallery of beautiful websites for designers seeking inspiration.",
+  openGraph: { type: "website", siteName: "BestSites" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
