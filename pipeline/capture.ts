@@ -1,16 +1,94 @@
 import type { CaptureResult } from "./types";
-import { chromium, type Browser, type Page } from "playwright";
 import { createAdminClient, MEDIA_BUCKET } from "@/lib/supabase/admin";
 import { domainFromUrl, slugify } from "@/lib/utils";
+import { extractMetadata } from "./metadata";
 
 /**
  * Website capture.
  *
- * Captures the views the inspiration directory needs today: desktop, mobile, and
- * full-page screenshots. This is designed for the CLI worker/local admin flow;
- * long-term production should run it in a worker/container, not Vercel serverless.
+ * Uses Playwright when available (local dev / worker). Falls back to a lightweight
+ * metadata + OG-image capture on serverless hosts like Vercel where Chromium cannot run.
  */
 export async function captureWebsite(url: string): Promise<CaptureResult> {
+  if (await canUsePlaywright()) {
+    try {
+      return await captureWithPlaywright(url);
+    } catch (error) {
+      console.warn("[capture] Playwright failed, falling back to lite capture:", error);
+    }
+  }
+
+  return captureLite(url);
+}
+
+const canUsePlaywright = async () => {
+  if (process.env.CAPTURE_MODE === "lite") return false;
+  if (process.env.CAPTURE_MODE === "playwright") return true;
+  if (process.env.VERCEL) return false;
+
+  try {
+    await import("playwright");
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+async function captureLite(url: string): Promise<CaptureResult> {
+  const metadata = await extractMetadata(url);
+  const media: CaptureResult["media"] = [];
+
+  if (metadata.ogImageUrl) {
+    const uploaded = await tryUploadRemoteImage(url, metadata.ogImageUrl, "desktop-og");
+    media.push({
+      kind: "desktop_shot",
+      storagePath: uploaded ?? metadata.ogImageUrl,
+      width: 1200,
+      height: 630,
+    });
+  }
+
+  return { media };
+}
+
+async function tryUploadRemoteImage(
+  pageUrl: string,
+  imageUrl: string,
+  filename: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(imageUrl, {
+      headers: { "user-agent": "BestSitesBot/1.0 (+https://bestsites.io)" },
+      redirect: "follow",
+    });
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get("content-type") ?? "image/png";
+    if (!contentType.startsWith("image/")) return null;
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const db = createAdminClient();
+    const domain = slugify(domainFromUrl(pageUrl)) || "site";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const extension = contentType.includes("jpeg") ? "jpg" : contentType.includes("webp") ? "webp" : "png";
+    const path = `captures/${domain}/${stamp}/${filename}.${extension}`;
+
+    const { error } = await db.storage.from(MEDIA_BUCKET).upload(path, buffer, {
+      contentType,
+      upsert: true,
+    });
+    if (error) throw error;
+
+    return path;
+  } catch (error) {
+    console.warn("[capture] Could not upload remote preview image:", error);
+    return null;
+  }
+}
+
+async function captureWithPlaywright(url: string): Promise<CaptureResult> {
+  const { chromium } = await import("playwright");
+
   const db = createAdminClient();
   const domain = slugify(domainFromUrl(url)) || "site";
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -65,7 +143,7 @@ export async function captureWebsite(url: string): Promise<CaptureResult> {
 }
 
 async function capturePage(
-  browser: Browser,
+  browser: import("playwright").Browser,
   url: string,
   options: {
     width: number;
@@ -103,7 +181,7 @@ async function capturePage(
   }
 }
 
-async function gotoSettled(page: Page, url: string) {
+async function gotoSettled(page: import("playwright").Page, url: string) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
   await page.waitForTimeout(750);

@@ -75,7 +75,7 @@ export default async function AdminDashboard() {
             ))}
           </ul>
           <p className="mt-2 text-sm text-muted-foreground">
-            Run <code className="rounded bg-muted px-1.5 py-0.5">pnpm worker</code> to process queued captures.
+            Captures now run immediately when you submit a URL.
           </p>
         </section>
       )}

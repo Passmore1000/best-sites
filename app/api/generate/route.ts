@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/auth";
-import { createPipelineJob } from "@/lib/jobs";
+import { claimPipelineJob, createPipelineJob, getPipelineJob } from "@/lib/jobs";
 import type { PipelineJobOptions } from "@/lib/types";
+import { processPipelineJob } from "@/worker/process";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const user = await getAdminUser();
@@ -31,13 +33,33 @@ export async function POST(request: Request) {
 
   try {
     const job = await createPipelineJob(url, options, user.email);
+    const claimed = await claimPipelineJob(job.id);
+    if (!claimed) {
+      return NextResponse.json({ error: "Could not start capture job" }, { status: 500 });
+    }
+
+    const result = await processPipelineJob(claimed);
+
+    if (!result) {
+      const failed = await getPipelineJob(job.id);
+      return NextResponse.json(
+        {
+          jobId: job.id,
+          status: failed?.status ?? "failed",
+          error: failed?.error ?? "Capture failed",
+        },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json({
       jobId: job.id,
-      status: job.status,
+      status: "completed",
       url: job.url,
+      result,
     });
   } catch (e) {
-    console.error("[api/generate] enqueue failed:", e);
+    console.error("[api/generate] capture failed:", e);
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
 }

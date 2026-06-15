@@ -58,11 +58,17 @@ export async function claimNextPipelineJob(): Promise<PipelineJobRow | null> {
   if (selectError) throw selectError;
   if (!pending) return null;
 
+  return claimPipelineJob(pending.id);
+}
+
+/** Claim a specific pending job so it can be processed inline. */
+export async function claimPipelineJob(id: string): Promise<PipelineJobRow | null> {
+  const db = createAdminClient();
   const startedAt = new Date().toISOString();
   const { data: claimed, error: updateError } = await db
     .from("pipeline_jobs")
     .update({ status: "running", started_at: startedAt })
-    .eq("id", pending.id)
+    .eq("id", id)
     .eq("status", "pending")
     .select("*")
     .maybeSingle();

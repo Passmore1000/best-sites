@@ -115,7 +115,16 @@ export default function NewListingPage() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to queue capture");
+      if (!res.ok) throw new Error(data.error ?? "Failed to capture site");
+
+      if (data.status === "completed" && data.result) {
+        setLoading(false);
+        setActiveJob({ id: data.jobId, status: "completed", result: data.result });
+        setResult(data.result);
+        setUrl("");
+        setSummary("");
+        return;
+      }
 
       setActiveJob({ id: data.jobId, status: data.status });
       startPolling(data.jobId);
@@ -127,9 +136,9 @@ export default function NewListingPage() {
 
   const jobLabel = activeJob
     ? activeJob.status === "pending"
-      ? "Queued — waiting for worker"
+      ? "Queued…"
       : activeJob.status === "running"
-        ? "Capturing screenshots…"
+        ? "Capturing preview…"
         : activeJob.status === "completed"
           ? "Capture complete"
           : "Capture failed"
@@ -140,9 +149,9 @@ export default function NewListingPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Add inspiration</h1>
         <p className="mt-2 max-w-2xl text-muted-foreground">
-          Paste a URL, categorize it while it captures, then publish it straight into the library
-          or keep it as a draft. Captures run in the background worker — keep{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-sm">pnpm worker</code> running locally.
+          Paste a URL and we&apos;ll capture a preview, pull metadata, and create a draft listing.
+          On production this uses a fast OG-image capture; locally you get full Playwright screenshots
+          when available.
         </p>
 
         <Card className="mt-6 p-6">
@@ -243,8 +252,8 @@ export default function NewListingPage() {
           ) : (
             <div className="flex aspect-[4/3] items-center justify-center bg-muted p-6 text-center text-sm text-muted-foreground">
               {loading
-                ? "Capture in progress — preview appears when the worker finishes."
-                : "Captured screenshots will appear here after the worker finishes."}
+                ? "Capture in progress — preview appears when finished."
+                : "Captured preview will appear here after submission."}
             </div>
           )}
           <div className="space-y-4 p-5">
